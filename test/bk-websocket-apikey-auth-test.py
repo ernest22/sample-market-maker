@@ -3,6 +3,8 @@ import hmac
 import json
 import time
 import urllib
+from requests import Request, Session, Response
+import requests
 
 from websocket import create_connection
 
@@ -15,21 +17,75 @@ from websocket import create_connection
 ###
 
 # These are not real keys - replace them with your keys.
-API_KEY = "dnyxZvB6nedbwIR-PMsc4s5r"
-API_SECRET = "PMjKf0sK-93Ty21Gn9dHoCAG3BuhdWY9JfWsJAlPxc1Y9yvP"
+API_KEY = "7ac720fe9e166525b410ed4549a8c03c"
+API_SECRET = "0c8ed26f1a2b8a928b4f388bd997223b"
 
 # Switch these comments to use testnet instead.
-BITMEX_URL = "wss://testnet.bitmex.com"
-#BITMEX_URL = "wss://www.bitmex.com"
+BITMEX_URL = "wss://api.bitkub.com"
+
 
 VERB = "GET"
-ENDPOINT = "/realtime"
+ENDPOINT = "/websocket-api/"
+
+
+class BitkubClient:
+    API_HOST = 'https://api.bitkub.com'
+
+    def __init__(self, acc) -> None:
+        self._session = Session()
+        
+        #change the account name
+        account = acc
+        self._account = account
+
+        with open('api.json') as json_file:
+            data = json.load(json_file)
+            for p in data:
+                exchange = p["exchange"]
+                if (exchange == "Bitkub"):
+                    name = p["name"]
+                    if (name == account):
+                        self._api_key = p["accesskey"]
+                        secret = p["secretkey"]
+                        self._api_secret = secret.encode()
+
+    def json_encode(self, data):
+        return json.dumps(data, separators=(',', ':'), sort_keys=True)
+
+    def sign(self, data):
+        j = self.json_encode(data)
+        #print('Signing payload: ' + j)
+        h = hmac.new(self._api_secret, msg=j.encode(), digestmod=hashlib.sha256)
+        return h.hexdigest()
+
+    # check server time
+    def check_time(self):
+        response = requests.get(self.API_HOST + '/api/servertime')
+        ts = int(response.text)
+        return(ts)
+    
+    def get_wstoken(self):
+        header = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-BTK-APIKEY': self._api_key,
+        }
+        data = {
+            'ts': self.check_time()
+        }
+
+        signature = self.sign(data)
+        data['sig'] = signature
+        response = requests.post(
+            self.API_HOST + '/api/market/wstoken', headers=header, data=self.json_encode(data))
+        token = json.loads(response.text)["result"]
+        return(token)
 
 
 def main():
     """Authenticate with the BitMEX API & request account information."""
     test_with_message()
-    test_with_querystring()
+    #test_with_querystring()
 
 
 def test_with_message():
@@ -37,29 +93,24 @@ def test_with_message():
     # and doesn't repeat.
     expires = int(time.time()) + 5
     # See signature generation reference at https://www.bitmex.com/app/apiKeys
-    signature = bitmex_signature(API_SECRET, VERB, ENDPOINT, expires)
 
-    # Initial connection - BitMEX sends a welcome message.
-    ws = create_connection(BITMEX_URL + ENDPOINT)
-    print("Receiving Welcome Message...")
-    result = ws.recv()
-    print("Received '%s'" % result)
-
-    # Send API Key with signed message.
-    request = {"op": "authKeyExpires", "args": [API_KEY, expires, signature]}
-    ws.send(json.dumps(request))
-    print("Sent Auth request")
+    bkclient = BitkubClient("Gorn")
+    wstoken = bkclient.get_wstoken()
+    streamname = "market.trade.thb_btc"
+    # Pinging Server
+    #endpoint = ENDPOINT
+    #ws = create_connection(BITMEX_URL + ENDPOINT + streamname)
+    streamname = "1"
+    ws = create_connection(BITMEX_URL + ENDPOINT + streamname)
+    request = {"auth": wstoken}
     result = ws.recv()
     print("Received '%s'" % result)
 
-    # Send a request that requires authorization.
-    request = {"op": "subscribe", "args": "position"}
-    ws.send(json.dumps(request))
-    print("Sent subscribe")
-    result = ws.recv()
-    print("Received '%s'" % result)
-    result = ws.recv()
-    print("Received '%s'" % result)
+    while(True):
+        result = ws.recv()
+        print("Received '%s'" % result)
+
+
 
     ws.close()
 

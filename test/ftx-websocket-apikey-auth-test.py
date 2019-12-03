@@ -15,21 +15,21 @@ from websocket import create_connection
 ###
 
 # These are not real keys - replace them with your keys.
-API_KEY = "dnyxZvB6nedbwIR-PMsc4s5r"
-API_SECRET = "PMjKf0sK-93Ty21Gn9dHoCAG3BuhdWY9JfWsJAlPxc1Y9yvP"
+API_KEY = "ZFSng3vL3E64ltoemsPSpvyTGv-oaAP1z2d-t3sJ"
+API_SECRET = "8ukwAK7WTFFBO_fuqZsgZXFXEJ7cQkBO5SZT5sLa"
 
 # Switch these comments to use testnet instead.
-BITMEX_URL = "wss://testnet.bitmex.com"
-#BITMEX_URL = "wss://www.bitmex.com"
+BITMEX_URL = "wss://ftx.com"
+
 
 VERB = "GET"
-ENDPOINT = "/realtime"
+ENDPOINT = "/ws/"
 
 
 def main():
     """Authenticate with the BitMEX API & request account information."""
     test_with_message()
-    test_with_querystring()
+    #test_with_querystring()
 
 
 def test_with_message():
@@ -37,27 +37,43 @@ def test_with_message():
     # and doesn't repeat.
     expires = int(time.time()) + 5
     # See signature generation reference at https://www.bitmex.com/app/apiKeys
-    signature = bitmex_signature(API_SECRET, VERB, ENDPOINT, expires)
 
-    # Initial connection - BitMEX sends a welcome message.
-    ws = create_connection(BITMEX_URL + ENDPOINT)
-    print("Receiving Welcome Message...")
+
+    # Pinging Server
+    #ws = create_connection(BITMEX_URL + ENDPOINT)
+    ws = create_connection("wss://ftx.com/ws?subscribe=channel:trades,market:BTCUSD")
+    result = ws.recv()
+    print("Pinging Server")
+    request = {"op": "ping"}
+    ws.send(json.dumps(request))
     result = ws.recv()
     print("Received '%s'" % result)
 
     # Send API Key with signed message.
-    request = {"op": "authKeyExpires", "args": [API_KEY, expires, signature]}
+    #request = {"op": "authKeyExpires", "args": [API_KEY, expires, signature]}
+    ts = int(time.time() * 1000)
+    #signature = bitmex_signature(API_SECRET, VERB, ENDPOINT, expires)
+    signature = hmac.new(API_SECRET.encode(), f'{ts}websocket_login'.encode(), 'sha256').hexdigest()
+    request = {'op': 'login', 'args': {'key': API_KEY, 'sign': signature, 'time': ts, 'subaccount': "GBT"}}
     ws.send(json.dumps(request))
     print("Sent Auth request")
-    result = ws.recv()
-    print("Received '%s'" % result)
+    #result = ws.recv()
+    #print("Received '%s'" % result)
 
     # Send a request that requires authorization.
-    request = {"op": "subscribe", "args": "position"}
+    request = {'op': 'subscribe', 'channel': 'orderbook', 'market': 'BTC-PERP'}
     ws.send(json.dumps(request))
     print("Sent subscribe")
     result = ws.recv()
     print("Received '%s'" % result)
+
+    
+    result = ws.recv()
+    print("Received '%s'" % result)
+
+    request = {'op': 'unsubscribe', 'channel': 'orderbook', 'market': 'BTC-PERP'}
+    ws.send(json.dumps(request))
+    print("Sent unsubscribe")
     result = ws.recv()
     print("Received '%s'" % result)
 
