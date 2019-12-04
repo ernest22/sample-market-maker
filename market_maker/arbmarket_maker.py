@@ -9,7 +9,7 @@ import atexit
 import signal
 import json
 
-from market_maker import bitmex, ftx, bk
+from market_maker import ftx, bk
 from market_maker.settings import settings
 from market_maker.utils import log, constants, errors, math
 
@@ -38,12 +38,12 @@ class ExchangeInterface:
                                     orderIDPrefix=settings.ORDERID_PREFIX, postOnly=settings.POST_ONLY,
                                     timeout=settings.TIMEOUT)
     
-
+        '''
         self.bk = bk.BK(base_url=settings.BKBASE_URL, symbol=settings.BKSYMBOL,
                                     apiKey=settings.BKAPI_KEY, apiSecret=settings.BKAPI_SECRET,
                                     orderIDPrefix=settings.ORDERID_PREFIX, postOnly=settings.POST_ONLY,
                                     timeout=settings.TIMEOUT)
-
+        '''
     def cancel_order(self, order):
         tickLog = self.get_instrument()['tickLog']
         logger.info("Canceling: %s %d @ %.*f" % (order['side'], order['orderQty'], tickLog, order['price']))
@@ -163,12 +163,12 @@ class ExchangeInterface:
     def get_position(self, symbol=None):
         if symbol is None:
             symbol = self.symbol
-        return self.bitmex.position(symbol)
+        return self.ftx.position(symbol)
 
     def get_ticker(self, symbol=None):
         if symbol is None:
             symbol = self.symbol
-        return self.bitmex.ticker_data(symbol)
+        return self.ftx.ticker_data(symbol)
 
     def is_open(self):
         """Check that websockets are still open."""
@@ -183,23 +183,24 @@ class ExchangeInterface:
     def check_if_orderbook_empty(self):
         """This function checks whether the order book is empty"""
         instrument = self.get_instrument()
+        print(instrument)
         if instrument['midPrice'] is None:
             raise errors.MarketEmptyError("Orderbook is empty, cannot quote")
 
     def amend_bulk_orders(self, orders):
         if self.dry_run:
             return orders
-        return self.bitmex.amend_bulk_orders(orders)
+        return self.ftx.amend_bulk_orders(orders)
 
     def create_bulk_orders(self, orders):
         if self.dry_run:
             return orders
-        return self.bitmex.create_bulk_orders(orders)
+        return self.ftx.create_bulk_orders(orders)
 
     def cancel_bulk_orders(self, orders):
         if self.dry_run:
             return orders
-        return self.bitmex.cancel([order['orderID'] for order in orders])
+        return self.ftx.cancel([order['orderID'] for order in orders])
 
 
 class OrderManager:
@@ -218,10 +219,10 @@ class OrderManager:
             logger.info("Order Manager initializing, connecting to BitMEX. Live run: executing real trades.")
 
         self.start_time = datetime.now()
-        #self.instrument = self.exchange.get_instrument()
-        #self.starting_qty = self.exchange.get_delta()
-        #self.running_qty = self.starting_qty
-        #self.reset()
+        self.instrument = self.exchange.get_instrument()
+        self.starting_qty = self.exchange.get_delta()
+        self.running_qty = self.starting_qty
+        self.reset()
 
     def reset(self):
         self.exchange.cancel_all_orders()

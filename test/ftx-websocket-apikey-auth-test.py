@@ -14,9 +14,18 @@ from websocket import create_connection
 # of methods.
 ###
 
+with open('api.json') as json_file:
+    data = json.load(json_file)
+    for p in data:
+        exchange = p["exchange"]
+        if (exchange == "FTX"):
+            name = p["name"]
+            if (name == "GBT"):
+                FTXAcc = name
+                API_KEY = p["accesskey"]
+                API_SECRET = p["secretkey"]
+
 # These are not real keys - replace them with your keys.
-API_KEY = "ZFSng3vL3E64ltoemsPSpvyTGv-oaAP1z2d-t3sJ"
-API_SECRET = "8ukwAK7WTFFBO_fuqZsgZXFXEJ7cQkBO5SZT5sLa"
 
 # Switch these comments to use testnet instead.
 BITMEX_URL = "wss://ftx.com"
@@ -40,9 +49,8 @@ def test_with_message():
 
 
     # Pinging Server
-    #ws = create_connection(BITMEX_URL + ENDPOINT)
-    ws = create_connection("wss://ftx.com/ws?subscribe=channel:trades,market:BTCUSD")
-    result = ws.recv()
+    ws = create_connection(BITMEX_URL + ENDPOINT)
+    #result = ws.recv()
     print("Pinging Server")
     request = {"op": "ping"}
     ws.send(json.dumps(request))
@@ -61,17 +69,17 @@ def test_with_message():
     #print("Received '%s'" % result)
 
     # Send a request that requires authorization.
-    request = {'op': 'subscribe', 'channel': 'orderbook', 'market': 'BTC-PERP'}
+    request = {'op': 'subscribe', 'channel': 'ticker', 'market': 'BTC-PERP'}
     ws.send(json.dumps(request))
     print("Sent subscribe")
     result = ws.recv()
     print("Received '%s'" % result)
 
-    
-    result = ws.recv()
-    print("Received '%s'" % result)
+    while(True):
+        result = ws.recv()
+        print("Received '%s'" % result)
 
-    request = {'op': 'unsubscribe', 'channel': 'orderbook', 'market': 'BTC-PERP'}
+    request = {'op': 'unsubscribe', 'channel': 'ticker', 'market': 'BTC-PERP'}
     ws.send(json.dumps(request))
     print("Sent unsubscribe")
     result = ws.recv()
