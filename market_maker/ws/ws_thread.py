@@ -212,24 +212,20 @@ class FTXWebsocket():
 
     def __wait_for_symbol(self, symbol):
         '''On subscribe, this data will come down. Wait for it.'''
-        print(self.data)
-        print("avoe")
         while not {'ticker', 'trades', 'orderbook', 'fills'} <= set(self.data):
             sleep(0.1)
-        print("here4")
 
-    def __send_command(self, command, channel, market):
+    def __send_command(self, command, table, market):
         '''Send a raw command.'''
-        self.ws.send(json.dumps({"op": command, "channel": channel, "market": market}))
+        self.ws.send(json.dumps({"op": command, "channel": table, "market": market}))
 
     def __on_message(self, message):
         '''Handler for parsing WS messages.'''
         message = json.loads(message)
-        
         self.logger.debug(json.dumps(message))
 
-        channel = message['channel'] if 'channel' in message else None
-        action = message['type'] if 'type' in message else None
+        table = message['channel'] if 'channel' in message else None
+        action = message['data']['action'] if 'data' in message and 'action' in message['data'] else None
         try:
             if 'subscribed' in message['type']:
                 self.logger.debug("Subscribed to %s." % message['market'])
@@ -244,36 +240,81 @@ class FTXWebsocket():
                     self.error(message['error'])
                 if message['status'] == 401:
                     self.error("API Key incorrect, please check and restart.")
-            else:
-                if channel not in self.data:
-                    self.data[channel] = []
+            elif action:
+                if table not in self.data:
+                    self.data[table] = []
                 
-
+                
                 # There are four possible types from the WS:
                 # 'partial' - full table image
                 # 'insert'  - new row
                 # 'update'  - update row
                 # 'delete'  - delete row
                 #print(message)
-                if 'partial' in message['type']:
-                    self.logger.debug("%s: partial" % channel)
-                    self.data[channel] += message['data']
-                    # Keys are communicated on partials to let you know how to uniquely identify
-                    # an item. We use it for updates.
+                if 'partial' in message['data']['action']:
+                    self.logger.debug("%s: partial" % table)
+                    datalist = list(message['data'].values()) 
+                    self.data[table] += datalist
 
-                if 'update' in message['type']:
+
+                if 'update' in message['data']['action']:
                     
-                    self.logger.debug('%s: updating %s' % (channel, message['data']))
+                    self.logger.debug('%s: updating %s' % (table, message['data']))
                     
                     # Locate the item in the collection and update it.
+                    updateDatalist = list(message['data'].items()) 
+                    for updateData in updateDatalist:
+                        if(updateData[0] == 'asks' or updateData[0] == 'bids'):
+                            if(updateData[1] == []):
+                                continue
+                            elif(updateData[0] == 'asks'):
+                                for bookupdate in updateData[1]:
+                                    i = 0
+                                    for listitem in self.data[table][3]:
+                                        length = len(self.data[table][3])  
+                                        if(self.data[table][3][i][0] == bookupdate[0]):      
+                                            self.data[table][3][i] = bookupdate
+                                            if(bookupdate[1] == 0):
+                                                self.data[table][3].remove(bookupdate)
+                                                break  
+                                            break
+                                        elif(float(self.data[table][3][i][0]) > float(bookupdate[0])):  
+                                            self.data[table][3].insert(i, bookupdate)   
+                                            break
+                                        if(i == length-1):
+                                            if(bookupdate[1] == 0):
+                                                break
+                                            self.data[table][3].append(bookupdate)   
+                                            break
+                                        i += 1
+                            elif(updateData[0] == 'bids'):
+                                for bookupdate in updateData[1]:
+                                    i = 0
+                                    for listitem in self.data[table][2]:  
+                                        length = len(self.data[table][2]) 
+                                        if(self.data[table][2][i][0] == bookupdate[0]):
+                                            self.data[table][2][i] = bookupdate
+                                            if(bookupdate[1] == 0):
+                                                self.data[table][2].remove(bookupdate)
+                                            break
+                                        elif(float(self.data[table][2][i][0]) < float(bookupdate[0])):  
+                                            self.data[table][2].insert(i, bookupdate)   
+                                            break
+                                        if(i == length-1):
+                                            if(bookupdate[1] == 0):
+                                                break
+                                            self.data[table][2].append(bookupdate)   
+                                            break
+                                        i += 1
 
-                    for updateData in message['data']:
-                        item = findItemByKeys(self.data[channel], updateData)
-                        if not item:
+
+                        
+                        else:
                             continue  # No item found to update. Could happen before push
 
                         # Log executions
-                        if channel == 'order':
+                        '''
+                        if table == 'order':
                             is_canceled = 'ordStatus' in updateData and updateData['ordStatus'] == 'Canceled'
                             if 'cumQty' in updateData and not is_canceled:
                                 contExecuted = updateData['cumQty'] - item['cumQty']
@@ -282,16 +323,16 @@ class FTXWebsocket():
                                     self.logger.info("Execution: %s %d Contracts of %s at %.*f" %
                                              (item['side'], contExecuted, item['symbol'],
                                               instrument['tickLog'], item['price']))
-
+                        '''
                         # Update this item.
-                        item.update(updateData)
+                        
 
                         # Remove canceled / filled orders
-                        if channel == 'fills' and item['leavesQty'] <= 0:
-                            self.data[channel].remove(item)
+                        if table == 'fills' and item['leavesQty'] <= 0:
+                            self.data[table].remove(item)
 
-                else:
-                    raise Exception("Unknown type: %s" % action)
+            else:
+                raise Exception("Unknown type: %s" % action)
         except:
             self.logger.error(traceback.format_exc())
 
@@ -592,16 +633,10 @@ class BKWebsocket():
 
 
 def findItemByKeys(table, matchData):
-    keys = ['time', 'checksum', 'bids', 'asks', 'action']
-    for item in table:
+    for item in table[2][1]:
         matched = True
-        print("Match")
-        print(matchData)
-        '''
-        for key in keys:
-            if item[key] != matchData:
-                matched = False
-        '''
+        if item[0] != matchData[0]:
+            matched = False
         if matched:
             return item
 
@@ -615,9 +650,9 @@ if __name__ == "__main__":
     # add formatter to ch
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-    ws = BitMEXWebsocket()
+    ws = FTXWebsocket()
     ws.logger = logger
-    ws.connect("https://testnet.bitmex.com/api/v1")
+    ws.connect("https://ftx.com/api/")
     while(ws.ws.sock.connected):
         sleep(1)
 
