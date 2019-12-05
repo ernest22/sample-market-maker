@@ -72,15 +72,16 @@ class FTXWebsocket():
         # Connected. Wait for partials
         self.__wait_for_symbol(symbol)
 
-        if self.shouldAuth:
-            self.__wait_for_account()
+        #if self.shouldAuth:
+            #self.__wait_for_account()
         self.logger.info('Got all market data. Starting.')
 
     #
     # Data methods
     #
     def get_instrument(self, symbol):
-        print("get_instrument")
+        #print("get_instrument")
+        #print(self.data)
         instruments = self.data['market']
         matchingInstruments = [i for i in instruments if i['symbol'] == symbol]
         if len(matchingInstruments) == 0:
@@ -118,8 +119,12 @@ class FTXWebsocket():
         return self.data['margin'][0]
 
     def market_depth(self, symbol):
-        raise NotImplementedError('orderBook is not subscribed; use askPrice and bidPrice on instrument')
-        # return self.data['orderBook25'][0]
+        #raise NotImplementedError('orderBook is not subscribed; use askPrice and bidPrice on instrument')
+        orderbook = {
+            "bids" : self.data['orderbook'][2],
+            "asks" : self.data['orderbook'][3]
+        }
+        return orderbook
 
     def open_orders(self, clOrdIDPrefix):
         orders = self.data['order']
@@ -212,7 +217,7 @@ class FTXWebsocket():
 
     def __wait_for_symbol(self, symbol):
         '''On subscribe, this data will come down. Wait for it.'''
-        while not {'ticker', 'trades', 'orderbook', 'fills'} <= set(self.data):
+        while not {'orderbook'} <= set(self.data):
             sleep(0.1)
 
     def __send_command(self, command, table, market):

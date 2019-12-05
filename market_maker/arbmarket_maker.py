@@ -49,7 +49,7 @@ class ExchangeInterface:
         logger.info("Canceling: %s %d @ %.*f" % (order['side'], order['orderQty'], tickLog, order['price']))
         while True:
             try:
-                self.bitmex.cancel(order['orderID'])
+                self.ftx.cancel(order['orderID'])
                 sleep(settings.API_REST_INTERVAL)
             except ValueError as e:
                 logger.info(e)
@@ -66,13 +66,13 @@ class ExchangeInterface:
 
         # In certain cases, a WS update might not make it through before we call this.
         # For that reason, we grab via HTTP to ensure we grab them all.
-        orders = self.bitmex.http_open_orders()
+        orders = self.ftx.http_open_orders()
 
         for order in orders:
             logger.info("Canceling: %s %d @ %.*f" % (order['side'], order['orderQty'], tickLog, order['price']))
 
         if len(orders):
-            self.bitmex.cancel([order['orderID'] for order in orders])
+            self.ftx.cancel([order['orderID'] for order in orders])
 
         sleep(settings.API_REST_INTERVAL)
 
@@ -80,8 +80,8 @@ class ExchangeInterface:
         contracts = settings.CONTRACTS
         portfolio = {}
         for symbol in contracts:
-            position = self.bitmex.position(symbol=symbol)
-            instrument = self.bitmex.instrument(symbol=symbol)
+            position = self.ftx.position(symbol=symbol)
+            instrument = self.ftx.instrument(symbol=symbol)
 
             if instrument['isQuanto']:
                 future_type = "Quanto"
@@ -219,9 +219,15 @@ class OrderManager:
             logger.info("Order Manager initializing, connecting to BitMEX. Live run: executing real trades.")
 
         self.start_time = datetime.now()
-        self.instrument = self.exchange.get_instrument()
-        self.starting_qty = self.exchange.get_delta()
-        self.running_qty = self.starting_qty
+        #self.orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
+        self.price = self.prepare_order(1)
+        print(self.price)
+        while(True):
+            self.price = self.prepare_order(1)
+            print(self.price)
+        #self.instrument = self.exchange.get_instrument()
+        #self.starting_qty = self.exchange.get_delta()
+        #self.running_qty = self.starting_qty
         self.reset()
 
     def reset(self):
@@ -290,12 +296,34 @@ class OrderManager:
         """Given an index (1, -1, 2, -2, etc.) return the price for that side of the book.
            Negative is a buy, positive is a sell."""
         # Maintain existing spreads for max profit
-        if settings.MAINTAIN_SPREADS:
+        if False:
+        #if settings.MAINTAIN_SPREADS:
             start_position = self.start_position_buy if index < 0 else self.start_position_sell
             # First positions (index 1, -1) should start right at start_position, others should branch from there
             index = index + 1 if index < 0 else index - 1
         else:
             # Offset mode: ticker comes from a reference exchange and we define an offset.
+            orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
+            amt = 10
+            asksize = 0
+            askvolume = 0
+            bidsize = 0
+            bidvolume = 0
+            i = 0
+            j = 0
+            fee = 1 - 0.000
+            while(asksize < amt):
+                asksize += orderbook["asks"][i][1]
+                askvolume += orderbook["asks"][i][1] * orderbook["asks"][i][0]/fee
+                i += 1
+            while(bidsize < amt):
+                bidsize += orderbook["bids"][j][1]
+                bidvolume += orderbook["bids"][j][1] * orderbook["bids"][j][0] * fee
+                j += 1
+            askprice = askvolume/asksize
+            bidprice = bidvolume/bidsize
+            self.start_position_sell = bidprice
+            self.start_position_buy = askprice
             start_position = self.start_position_buy if index < 0 else self.start_position_sell
 
             # If we're attempting to sell, but our sell price is actually lower than the buy,
@@ -305,8 +333,8 @@ class OrderManager:
             # Same for buys.
             if index < 0 and start_position > self.start_position_sell:
                 start_position = self.start_position_buy
-
-        return math.toNearest(start_position * (1 + settings.INTERVAL) ** index, self.instrument['tickSize'])
+        return math.toNearest(bidprice, 0.01)
+        #return math.toNearest(start_position * (1 + settings.INTERVAL) ** index, self.instrument['tickSize'])
 
     ###
     # Orders
@@ -493,7 +521,7 @@ class OrderManager:
         logger.info("Shutting down. All open orders will be cancelled.")
         try:
             self.exchange.cancel_all_orders()
-            self.exchange.bitmex.exit()
+            self.exchange.ftx.exit()
         except errors.AuthenticationError as e:
             logger.info("Was not authenticated; could not cancel orders.")
         except Exception as e:
