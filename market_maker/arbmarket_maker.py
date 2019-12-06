@@ -235,7 +235,7 @@ class OrderManager:
         #self.sanity_check()
         self.print_status()
         # Create orders and converge.
-        #self.place_orders()
+        self.place_orders()
 
     def print_status(self):
         """Print the current MM status."""
@@ -345,7 +345,7 @@ class OrderManager:
 
     def place_orders(self):
         """Create order items for use in convergence."""
-
+        '''
         buy_orders = []
         sell_orders = []
         # Create orders from the outside in. This is intentional - let's say the inner order gets taken;
@@ -357,8 +357,25 @@ class OrderManager:
                 buy_orders.append(self.prepare_order(-i))
             if not self.short_position_limit_exceeded():
                 sell_orders.append(self.prepare_order(i))
+        '''
+        i = 1
+        symbol=settings.FTXSYMBOL
+        size = 0.01
+        spread = 0.0002
+        bid = self.prepare_order(-i)
+        ask = self.prepare_order(i)
+        j = 0
+        while (j < 10):
+            size = size + size * j/5
+            targetask = ask["price"] * (1+spread+spread*j/2)
+            targetbid = bid["price"] * (1-spread-spread*j/2)
+            placeask = self.exchange.ftx.place_order(symbol, "sell", targetask , size , "limit") 
+            placebid = self.exchange.ftx.place_order(symbol, "buy", targetbid , size , "limit")
+            j += 1 
 
-        return self.converge_orders(buy_orders, sell_orders)
+
+        #return self.converge_orders(buy_orders, sell_orders)
+
 
     def prepare_order(self, index):
         """Create an order object."""
@@ -368,7 +385,7 @@ class OrderManager:
         else:
             quantity = settings.ORDER_START_SIZE + ((abs(index) - 1) * settings.ORDER_STEP_SIZE)
 
-        quantity = 10000
+        quantity = 0.01
         price = self.get_price_offset(index,quantity)
 
         return {'price': price, 'orderQty': quantity, 'side': "Buy" if index < 0 else "Sell"}
