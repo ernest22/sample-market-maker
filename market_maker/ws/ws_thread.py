@@ -19,7 +19,6 @@ from websocket import create_connection
 with hooks():  # Python 2/3 compat
     from urllib.parse import urlparse, urlunparse
 
-
 # Connects to BitMEX websocket for streaming realtime data.
 # The Marketmaker still interacts with this as if it were a REST Endpoint, but now it can get
 # much more realtime data without heavily polling the API.
@@ -66,14 +65,12 @@ class FTXWebsocket():
         self.logger.info("Connecting to %s" % wsURL)
         self.__connect(wsURL)
         self.logger.info('Connected to FTX WS. Waiting for data images, this may take a moment...')
-        self.__send_command('unsubscribe', 'orderbook', self.symbol)
         self.__send_command('subscribe', 'orderbook', self.symbol)
-
         # Connected. Wait for partials
         self.__wait_for_symbol(symbol)
-
-        #if self.shouldAuth:
-            #self.__wait_for_account()
+        self.__auth()
+        self.__send_privcommand('subscribe', 'fills')
+        self.__send_privcommand('subscribe', 'orders')
         self.logger.info('Got all market data. Starting.')
 
     #
@@ -169,7 +166,7 @@ class FTXWebsocket():
                                          on_close=self.__on_close,
                                          on_open=self.__on_open,
                                          on_error=self.__on_error,
-                                         header=self.__get_auth()
+                                         #header=self.__auth()
                                          )
 
         setup_custom_logger('websocket', log_level=settings.LOG_LEVEL)
@@ -189,24 +186,16 @@ class FTXWebsocket():
             self.exit()
             sys.exit(1)
 
-    def __get_auth(self):
+    def __auth(self):
         '''Return auth headers. Will use API Keys if present in settings.'''
-
-        if self.shouldAuth is False:
-            return []
 
         self.logger.info("Authenticating with API Key.")
         # To auth to the WS using an API key, we generate a signature of a nonce and
         # the WS API endpoint.
         ts = int(time.time() * 1000)
         signature = hmac.new(settings.FTXAPI_SECRET.encode(), f'{ts}websocket_login'.encode(), 'sha256').hexdigest()
-
-        return [
-            "time: " + str(ts),
-            "sign: " + signature,
-            "key:" + settings.FTXAPI_KEY,
-            'subaccount: ' + "GBT"
-        ]
+        request = {'op': 'login', 'args': {'key': settings.FTXAPI_KEY, 'sign': signature, 'time': ts, 'subaccount': settings.FTXAcc}}
+        self.ws.send(json.dumps(request))
 
     def __wait_for_account(self):
         '''On subscribe, this data will come down. Wait for it.'''
@@ -224,6 +213,10 @@ class FTXWebsocket():
         '''Send a raw command.'''
         self.ws.send(json.dumps({"op": command, "channel": table, "market": market}))
 
+    def __send_privcommand(self, command, table):
+        '''Send a raw private command.'''
+        self.ws.send(json.dumps({"op": command, "channel": table}))
+
     def __on_message(self, message):
         '''Handler for parsing WS messages.'''
         message = json.loads(message)
@@ -233,7 +226,10 @@ class FTXWebsocket():
         action = message['data']['action'] if 'data' in message and 'action' in message['data'] else None
         try:
             if 'subscribed' in message['type']:
-                self.logger.debug("Subscribed to %s." % message['market'])
+                if 'market' in message:
+                    self.logger.debug("Subscribed to %(channel)s %(market)s."  % { "channel": message['channel'],  "market": message['market']})
+                else:
+                    self.logger.debug("Subscribed to %s."  % message['channel'])
             elif 'unsubscribed' in message['type']:
                 self.logger.debug("Unsubscribed to %s." % message['market'])
             elif 'info' in message['type']:
@@ -318,24 +314,39 @@ class FTXWebsocket():
                             continue  # No item found to update. Could happen before push
 
                         # Log executions
-                        '''
-                        if table == 'order':
-                            is_canceled = 'ordStatus' in updateData and updateData['ordStatus'] == 'Canceled'
-                            if 'cumQty' in updateData and not is_canceled:
-                                contExecuted = updateData['cumQty'] - item['cumQty']
-                                if contExecuted > 0:
-                                    instrument = self.get_instrument(item['symbol'])
-                                    self.logger.info("Execution: %s %d Contracts of %s at %.*f" %
-                                             (item['side'], contExecuted, item['symbol'],
-                                              instrument['tickLog'], item['price']))
-                        '''
-                        # Update this item.
-                        
 
+            elif table == 'orders':
+                if table not in self.data:
+                    self.data[table] = []
+                updateData = list(message['data'].values()) 
+                if(updateData[7] == "closed"):
+                    id = updateData[0]
+                    i = 0
+                    for order in self.data[table]:
+                        if(order[0] == id):
+                            self.data[table].pop(i)
+                            break
+                        i += 1
+                else:
+                    id = updateData[0]
+                    i = 0
+                    NewOrder = True
+                    for order in self.data[table]:
+                        if(order[0] == id):
+                            self.data[table][i] = updateData
+                            NewOrder = False
+                            break
+                        i += 1
+                    if(NewOrder == True):
+                        self.data[table].append(updateData) 
                         # Remove canceled / filled orders
-                        if table == 'fills' and item['leavesQty'] <= 0:
-                            self.data[table].remove(item)
-
+            elif table == 'fills':
+                if table not in self.data:
+                    self.data[table] = []
+                updateData = list(message['data'].values()) 
+                self.data[table].append(updateData)     
+                print(message['data'].values())
+                #logger.info('FTX Fill Price: %(fill)s ' % {"fill": message['data']})
             else:
                 raise Exception("Unknown type: %s" % action)
         except:

@@ -106,24 +106,9 @@ class FTX(object):
                     data['result'] = "errorT"
                     return data['result']
                 raise Exception(data)
-                #raise Exception(data['error'])
             else:
                 return data['result']
     
-    def get_balances(self) -> List[dict]:
-        return self._get('wallet/balances')
-
-    def place_order(self, market: str, side: str, price: float, size: float, type1: str,
-                    ioc: bool = False, post_only: bool = False) -> dict:
-        return self._post('orders', {'market': market,
-                                     'side': side,
-                                     'price': price,
-                                     'size': size,
-                                     'type': type1,
-                                     'ioc': ioc,
-                                     'postOnly': post_only})
-
-
     def ticker_data(self, symbol=None):
         """Get ticker data."""
         if symbol is None:
@@ -176,6 +161,10 @@ class FTX(object):
         """Get your current balance."""
         return self.ws.funds()
 
+    @authentication_required    
+    def get_balances(self) -> List[dict]:
+        return self._get('wallet/balances')
+
     @authentication_required
     def position(self, symbol):
         """Get your open position."""
@@ -227,6 +216,25 @@ class FTX(object):
             'clOrdID': clOrdID
         }
         return self._curl_bitmex(path=endpoint, postdict=postdict, verb="POST")
+
+    @authentication_required
+    def place_order(self, market: str, side: str, price: float, size: float, type1: str,
+                    ioc: bool = False, post_only: bool = False) -> dict:
+        return self._post('orders', {'market': market,
+                                     'side': side,
+                                     'price': price,
+                                     'size': size,
+                                     'type': type1,
+                                     'ioc': ioc,
+                                     'postOnly': post_only})
+    @authentication_required    
+    def cancel_order(self,id) -> List[dict]:
+        return self._delete('orders'+id)
+    
+    
+    @authentication_required    
+    def cancel_all_order(self) -> List[dict]:
+        return self._delete('orders')
 
     @authentication_required
     def amend_bulk_orders(self, orders):

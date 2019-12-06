@@ -59,14 +59,16 @@ class ExchangeInterface:
                 break
 
     def cancel_all_orders(self):
+        
         if self.dry_run:
             return
 
         logger.info("Resetting current position. Canceling all existing orders.")
-        tickLog = self.get_instrument()['tickLog']
+        #tickLog = self.get_instrument()['tickLog']
 
         # In certain cases, a WS update might not make it through before we call this.
         # For that reason, we grab via HTTP to ensure we grab them all.
+        '''
         orders = self.ftx.http_open_orders()
 
         for order in orders:
@@ -74,7 +76,8 @@ class ExchangeInterface:
 
         if len(orders):
             self.ftx.cancel([order['orderID'] for order in orders])
-
+        '''
+        self.ftx.cancel_all_order()
         sleep(settings.API_REST_INTERVAL)
 
     def get_portfolio(self):
@@ -224,6 +227,7 @@ class OrderManager:
         #self.instrument = self.exchange.get_instrument()
         #self.starting_qty = self.exchange.get_delta()
         #self.running_qty = self.starting_qty
+        #self.print_status()
         self.reset()
 
     def reset(self):
@@ -253,7 +257,8 @@ class OrderManager:
         logger.info("Total Contract Delta: %.4f XBT" % self.exchange.calc_delta()['spot'])
         '''
         for coin in self.exchange.ftx.get_balances():
-            logger.info('Current FTX %(coin)s Balance: %(amt)s (available: %(free)s)' % {"coin" : coin['coin'],  "amt": coin['total'], "free": coin['free']})
+            if(coin['coin'] == "USD" or coin['coin'] == "USDT"):
+                logger.info('Current FTX %(coin)s Balance: %(amt)s (available: %(free)s)' % {"coin" : coin['coin'],  "amt": coin['total'], "free": coin['free']})
 
     def get_ticker(self):
         ticker = self.exchange.get_ticker()
@@ -290,7 +295,7 @@ class OrderManager:
                      tickLog, self.start_position_mid))
         return ticker
 
-    def get_price_offset(self, index):
+    def get_price_offset(self, index, quantity):
         """Given an index (1, -1, 2, -2, etc.) return the price for that side of the book.
            Negative is a buy, positive is a sell."""
         # Maintain existing spreads for max profit
@@ -302,7 +307,7 @@ class OrderManager:
         else:
             # Offset mode: ticker comes from a reference exchange and we define an offset.
             orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
-            amt = 10
+            amt = quantity
             asksize = 0
             askvolume = 0
             bidsize = 0
@@ -326,12 +331,12 @@ class OrderManager:
 
             # If we're attempting to sell, but our sell price is actually lower than the buy,
             # move over to the sell side.
-            if index > 0 and start_position < self.start_position_buy:
-                start_position = self.start_position_sell
+            if index > 0:
+                return math.toNearest(bidprice, 0.0001)
             # Same for buys.
-            if index < 0 and start_position > self.start_position_sell:
-                start_position = self.start_position_buy
-        return math.toNearest(bidprice, 0.01)
+            if index < 0 :
+                return math.toNearest(askprice, 0.0001)
+        
         #return math.toNearest(start_position * (1 + settings.INTERVAL) ** index, self.instrument['tickSize'])
 
     ###
@@ -363,7 +368,8 @@ class OrderManager:
         else:
             quantity = settings.ORDER_START_SIZE + ((abs(index) - 1) * settings.ORDER_STEP_SIZE)
 
-        price = self.get_price_offset(index)
+        quantity = 10000
+        price = self.get_price_offset(index,quantity)
 
         return {'price': price, 'orderQty': quantity, 'side': "Buy" if index < 0 else "Sell"}
 
@@ -542,9 +548,11 @@ class OrderManager:
                 self.restart()
 
             #self.sanity_check()  # Ensures health of mm - several cut-out points here
-            self.print_status()  # Print skew, delta, etc
+            #self.print_status()  # Print skew, delta, etc
+            self.price = self.prepare_order(-1)
+            logger.debug('Current FTX %(side)s Price: %(price)s ' % {"side" : self.price['side'],  "price": self.price['price']})
             self.price = self.prepare_order(1)
-            print(self.price)
+            logger.debug('Current FTX %(side)s Price: %(price)s ' % {"side" : self.price['side'],  "price": self.price['price']})
             #self.place_orders()  # Creates desired orders and converges to existing orders
 
     def restart(self):
