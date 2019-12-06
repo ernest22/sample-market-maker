@@ -8,6 +8,7 @@ import requests
 import atexit
 import signal
 import json
+import time
 
 from market_maker import ftx, bk
 from market_maker.settings import settings
@@ -34,7 +35,7 @@ class ExchangeInterface:
  
         
         self.ftx = ftx.FTX(base_url=settings.FTXBASE_URL, symbol=settings.FTXSYMBOL,
-                                    apiKey=settings.FTXAPI_KEY, apiSecret=settings.FTXAPI_SECRET,
+                                    apiKey=settings.FTXAPI_KEY, apiSecret=settings.FTXAPI_SECRET, ftxacc=settings.FTXAcc,
                                     orderIDPrefix=settings.ORDERID_PREFIX, postOnly=settings.POST_ONLY,
                                     timeout=settings.TIMEOUT)
     
@@ -214,17 +215,12 @@ class OrderManager:
         logger.info("Using symbol %s." % self.exchange.symbol)
 
         if settings.DRY_RUN:
-            logger.info("Initializing dry run. Orders printed below represent what would be posted to BitMEX.")
+            logger.info("Initializing dry run. Orders printed below represent what would be posted to FTX.")
         else:
-            logger.info("Order Manager initializing, connecting to BitMEX. Live run: executing real trades.")
+            logger.info("Order Manager initializing, connecting to FTX. Live run: executing real trades.")
 
         self.start_time = datetime.now()
         #self.orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
-        self.price = self.prepare_order(1)
-        print(self.price)
-        while(True):
-            self.price = self.prepare_order(1)
-            print(self.price)
         #self.instrument = self.exchange.get_instrument()
         #self.starting_qty = self.exchange.get_delta()
         #self.running_qty = self.starting_qty
@@ -232,23 +228,22 @@ class OrderManager:
 
     def reset(self):
         self.exchange.cancel_all_orders()
-        self.sanity_check()
+        #self.sanity_check()
         self.print_status()
-
         # Create orders and converge.
-        self.place_orders()
+        #self.place_orders()
 
     def print_status(self):
         """Print the current MM status."""
-
+        '''
         margin = self.exchange.get_margin()
         position = self.exchange.get_position()
         self.running_qty = self.exchange.get_delta()
         tickLog = self.exchange.get_instrument()['tickLog']
         self.start_XBt = margin["marginBalance"]
 
-        logger.info("Current XBT Balance: %.6f" % XBt_to_XBT(self.start_XBt))
-        logger.info("Current Contract Position: %d" % self.running_qty)
+        logger.info("Current BTC Balance: %.6f" % XBt_to_XBT(self.start_XBt))
+        #logger.info("Current Contract Position: %d" % self.running_qty)
         if settings.CHECK_POSITION_LIMITS:
             logger.info("Position limits: %d/%d" % (settings.MIN_POSITION, settings.MAX_POSITION))
         if position['currentQty'] != 0:
@@ -256,6 +251,9 @@ class OrderManager:
             logger.info("Avg Entry Price: %.*f" % (tickLog, float(position['avgEntryPrice'])))
         logger.info("Contracts Traded This Run: %d" % (self.running_qty - self.starting_qty))
         logger.info("Total Contract Delta: %.4f XBT" % self.exchange.calc_delta()['spot'])
+        '''
+        for coin in self.exchange.ftx.get_balances():
+            logger.info('Current FTX %(coin)s Balance: %(amt)s (available: %(free)s)' % {"coin" : coin['coin'],  "amt": coin['total'], "free": coin['free']})
 
     def get_ticker(self):
         ticker = self.exchange.get_ticker()
@@ -543,9 +541,11 @@ class OrderManager:
                 logger.error("Realtime data connection unexpectedly closed, restarting.")
                 self.restart()
 
-            self.sanity_check()  # Ensures health of mm - several cut-out points here
+            #self.sanity_check()  # Ensures health of mm - several cut-out points here
             self.print_status()  # Print skew, delta, etc
-            self.place_orders()  # Creates desired orders and converges to existing orders
+            self.price = self.prepare_order(1)
+            print(self.price)
+            #self.place_orders()  # Creates desired orders and converges to existing orders
 
     def restart(self):
         logger.info("Restarting the market maker...")

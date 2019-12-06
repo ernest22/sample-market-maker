@@ -7,6 +7,9 @@ import json
 import base64
 import uuid
 import logging
+import hmac
+from requests import Request, Session, Response
+from typing import Optional, Any, List, Dict
 from market_maker.auth import APIKeyAuthWithExpires
 from market_maker.utils import constants, errors
 from market_maker.ws.ws_thread import FTXWebsocket
@@ -17,7 +20,7 @@ class FTX(object):
 
     """FTX API Connector."""
 
-    def __init__(self, base_url=None, symbol=None, apiKey=None, apiSecret=None,
+    def __init__(self, base_url=None, symbol=None, apiKey=None, apiSecret=None, ftxacc=None,
                  orderIDPrefix='mm_bitmex_', shouldWSAuth=True, postOnly=False, timeout=7):
         """Init connector."""
         self.logger = logging.getLogger('root')
@@ -30,9 +33,7 @@ class FTX(object):
                             )
         self.apiKey = apiKey
         self.apiSecret = apiSecret
-        if len(orderIDPrefix) > 13:
-            raise ValueError("settings.ORDERID_PREFIX must be at most 13 characters long!")
-        self.orderIDPrefix = orderIDPrefix
+        self._subaccount_name = ftxacc
         self.retries = 0  # initialize counter
 
         # Prepare HTTPS session
@@ -57,6 +58,72 @@ class FTX(object):
     #
     # Public methods
     #
+
+    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        return self._request('GET', path, params=params)
+
+    def _post(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        return self._request('POST', path, json=params)
+
+    def _delete(self, path: str) -> Any:
+        return self._request('DELETE', path)
+
+    def _request(self, method: str, path: str, **kwargs) -> Any:
+        request = Request(method, self.base_url + path, **kwargs)
+        self._sign_request(request)
+        response = self.session.send(request.prepare())
+        pros_res = self._process_response(response)
+        while(pros_res == "errorT"):
+            print("Trying again")
+            self._sign_request(request)
+            response = self.session.send(request.prepare())
+            pros_res = self._process_response(response)
+        return pros_res
+
+    def _sign_request(self, request: Request) -> None:
+        ts = int(time.time() * 1000)
+        prepared = request.prepare()
+        signature_payload = f'{ts}{prepared.method}{prepared.path_url}'.encode()
+        if prepared.body:
+            signature_payload += prepared.body
+        signature = hmac.new(self.apiSecret.encode(), signature_payload, 'sha256').hexdigest()
+        request.headers['FTX-KEY'] = self.apiKey
+        request.headers['FTX-SIGN'] = signature
+        request.headers['FTX-TS'] = str(ts)
+        if self._subaccount_name:
+            request.headers['FTX-SUBACCOUNT'] = self._subaccount_name
+
+    def _process_response(self, response: Response) -> Any:
+        try:
+            data = response.json()
+        except ValueError:
+            response.raise_for_status()
+            raise
+        else:
+            if not data['success']:
+                print(data)
+                if (data['error'] == 'Try again'):
+                    data['result'] = "errorT"
+                    return data['result']
+                raise Exception(data)
+                #raise Exception(data['error'])
+            else:
+                return data['result']
+    
+    def get_balances(self) -> List[dict]:
+        return self._get('wallet/balances')
+
+    def place_order(self, market: str, side: str, price: float, size: float, type1: str,
+                    ioc: bool = False, post_only: bool = False) -> dict:
+        return self._post('orders', {'market': market,
+                                     'side': side,
+                                     'price': price,
+                                     'size': size,
+                                     'type': type1,
+                                     'ioc': ioc,
+                                     'postOnly': post_only})
+
+
     def ticker_data(self, symbol=None):
         """Get ticker data."""
         if symbol is None:
