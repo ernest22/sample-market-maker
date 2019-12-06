@@ -229,7 +229,7 @@ class FTX(object):
                                      'postOnly': post_only})
     @authentication_required    
     def cancel_order(self,id) -> List[dict]:
-        return self._delete('orders'+id)
+        return self._delete('orders/'+str(id[0]))
     
     
     @authentication_required    
@@ -245,17 +245,21 @@ class FTX(object):
     @authentication_required
     def create_bulk_orders(self, orders):
         """Create multiple orders."""
+        
         for order in orders:
-            order['clOrdID'] = self.orderIDPrefix + base64.b64encode(uuid.uuid4().bytes).decode('utf8').rstrip('=\n')
             order['symbol'] = self.symbol
             if self.postOnly:
                 order['execInst'] = 'ParticipateDoNotInitiate'
-        return self._curl_bitmex(path='order/bulk', postdict={'orders': orders}, verb='POST')
+            self.place_order(order['symbol'], order['side'], order['price'] , order['orderQty'] , "limit")
+        #return self._curl_bitmex(path='order/bulk', postdict={'orders': orders}, verb='POST')
 
     @authentication_required
     def open_orders(self):
         """Get open orders."""
-        return self.ws.open_orders(self.orderIDPrefix)
+        if 'orders' in self.ws.data:
+            return self.ws.data["orders"]
+        else:
+            return [] 
 
     @authentication_required
     def http_open_orders(self):

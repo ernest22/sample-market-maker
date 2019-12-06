@@ -151,14 +151,14 @@ class ExchangeInterface:
         return self.ftx.open_orders()
 
     def get_highest_buy(self):
-        buys = [o for o in self.get_orders() if o['side'] == 'Buy']
+        buys = [o for o in self.get_orders() if o['side'] == 'buy']
         if not len(buys):
             return {'price': -2**32}
         highest_buy = max(buys or [], key=lambda o: o['price'])
         return highest_buy if highest_buy else {'price': -2**32}
 
     def get_lowest_sell(self):
-        sells = [o for o in self.get_orders() if o['side'] == 'Sell']
+        sells = [o for o in self.get_orders() if o['side'] == 'sell']
         if not len(sells):
             return {'price': 2**32}
         lowest_sell = min(sells or [], key=lambda o: o['price'])
@@ -204,7 +204,7 @@ class ExchangeInterface:
     def cancel_bulk_orders(self, orders):
         if self.dry_run:
             return orders
-        return self.ftx.cancel([order['orderID'] for order in orders])
+        return self.ftx.cancel_order([order[0] for order in orders])
 
 
 class OrderManager:
@@ -332,10 +332,10 @@ class OrderManager:
             # If we're attempting to sell, but our sell price is actually lower than the buy,
             # move over to the sell side.
             if index > 0:
-                return math.toNearest(bidprice, 0.0001)
+                return math.toNearest(bidprice-0.0001, 0.0001)
             # Same for buys.
             if index < 0 :
-                return math.toNearest(askprice, 0.0001)
+                return math.toNearest(askprice+0.0001, 0.0001)
         
         #return math.toNearest(start_position * (1 + settings.INTERVAL) ** index, self.instrument['tickSize'])
 
@@ -358,6 +358,7 @@ class OrderManager:
             if not self.short_position_limit_exceeded():
                 sell_orders.append(self.prepare_order(i))
         '''
+        #self.exchange.cancel_all_orders()
         i = 1
         symbol=settings.FTXSYMBOL
         size = 0.01
@@ -365,16 +366,20 @@ class OrderManager:
         bid = self.prepare_order(-i)
         ask = self.prepare_order(i)
         j = 0
-        while (j < 10):
+        '''
+        while (j < 5):
             size = size + size * j/5
             targetask = ask["price"] * (1+spread+spread*j/2)
             targetbid = bid["price"] * (1-spread-spread*j/2)
             placeask = self.exchange.ftx.place_order(symbol, "sell", targetask , size , "limit") 
             placebid = self.exchange.ftx.place_order(symbol, "buy", targetbid , size , "limit")
             j += 1 
-
-
-        #return self.converge_orders(buy_orders, sell_orders)
+        '''
+        buy_orders = []
+        buy_orders.append(self.prepare_order(-i))
+        sell_orders = []
+        sell_orders.append(self.prepare_order(i))
+        return self.converge_orders(buy_orders, sell_orders)
 
 
     def prepare_order(self, index):
@@ -388,14 +393,15 @@ class OrderManager:
         quantity = 0.01
         price = self.get_price_offset(index,quantity)
 
-        return {'price': price, 'orderQty': quantity, 'side': "Buy" if index < 0 else "Sell"}
+        return {'price': price, 'orderQty': quantity, 'side': "buy" if index > 0 else "sell"}
 
     def converge_orders(self, buy_orders, sell_orders):
         """Converge the orders we currently have in the book with what we want to be in the book.
            This involves amending any open orders and creating new ones if any have filled completely.
            We start from the closest orders outward."""
 
-        tickLog = self.exchange.get_instrument()['tickLog']
+        #tickLog = self.exchange.get_instrument()['tickLog']
+        tickLog = 4
         to_amend = []
         to_create = []
         to_cancel = []
@@ -407,7 +413,7 @@ class OrderManager:
         # If there's an open one, we might be able to amend it to fit what we want.
         for order in existing_orders:
             try:
-                if order['side'] == 'Buy':
+                if order[4] == 'buy':
                     desired_order = buy_orders[buys_matched]
                     buys_matched += 1
                 else:
@@ -415,12 +421,12 @@ class OrderManager:
                     sells_matched += 1
 
                 # Found an existing order. Do we need to amend it?
-                if desired_order['orderQty'] != order['leavesQty'] or (
+                if desired_order['orderQty'] != order[9] or (
                         # If price has changed, and the change is more than our RELIST_INTERVAL, amend.
-                        desired_order['price'] != order['price'] and
-                        abs((desired_order['price'] / order['price']) - 1) > settings.RELIST_INTERVAL):
-                    to_amend.append({'orderID': order['orderID'], 'orderQty': order['cumQty'] + desired_order['orderQty'],
-                                     'price': desired_order['price'], 'side': order['side']})
+                        desired_order['price'] != order[5] and
+                        abs((desired_order['price'] / order[5]) - 1) > settings.RELIST_INTERVAL):
+                    to_amend.append({'orderID': order[0], 'orderQty': order[8] + desired_order['orderQty'],
+                                     'price': desired_order['price'], 'side': order[4]})
             except IndexError:
                 # Will throw if there isn't a desired order to match. In that case, cancel it.
                 to_cancel.append(order)
@@ -461,14 +467,14 @@ class OrderManager:
         if len(to_create) > 0:
             logger.info("Creating %d orders:" % (len(to_create)))
             for order in reversed(to_create):
-                logger.info("%4s %d @ %.*f" % (order['side'], order['orderQty'], tickLog, order['price']))
+                logger.info("%4s %s @ %.*f" % (order['side'], order['orderQty'], tickLog, order['price']))
             self.exchange.create_bulk_orders(to_create)
 
         # Could happen if we exceed a delta limit
         if len(to_cancel) > 0:
             logger.info("Canceling %d orders:" % (len(to_cancel)))
             for order in reversed(to_cancel):
-                logger.info("%4s %d @ %.*f" % (order['side'], order['leavesQty'], tickLog, order['price']))
+                logger.info("%4s %s @ %.*f" % (order[4], order[9], tickLog, order[5]))
             self.exchange.cancel_bulk_orders(to_cancel)
 
     ###
@@ -570,7 +576,7 @@ class OrderManager:
             logger.debug('Current FTX %(side)s Price: %(price)s ' % {"side" : self.price['side'],  "price": self.price['price']})
             self.price = self.prepare_order(1)
             logger.debug('Current FTX %(side)s Price: %(price)s ' % {"side" : self.price['side'],  "price": self.price['price']})
-            #self.place_orders()  # Creates desired orders and converges to existing orders
+            self.place_orders()  # Creates desired orders and converges to existing orders
 
     def restart(self):
         logger.info("Restarting the market maker...")
