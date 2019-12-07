@@ -300,8 +300,8 @@ class OrderManager:
            Negative is a buy, positive is a sell."""
         # Maintain existing spreads for max profit
         orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
-        askprice = orderbook["asks"][0][0] - 0.0001
-        bidprice = orderbook["bids"][0][0] + 0.0001
+        askprice = orderbook["asks"][0][0]
+        bidprice = orderbook["bids"][0][0]
         if settings.MAINTAIN_SPREADS:
             #start_position = self.start_position_buy if index < 0 else self.start_position_sell
             start_position =  bidprice if index < 0 else askprice
