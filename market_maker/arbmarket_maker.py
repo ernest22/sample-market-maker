@@ -299,44 +299,27 @@ class OrderManager:
         """Given an index (1, -1, 2, -2, etc.) return the price for that side of the book.
            Negative is a buy, positive is a sell."""
         # Maintain existing spreads for max profit
-        if False:
-        #if settings.MAINTAIN_SPREADS:
-            start_position = self.start_position_buy if index < 0 else self.start_position_sell
+        orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
+        askprice = orderbook["asks"][0][0] - 0.0001
+        bidprice = orderbook["bids"][0][0] + 0.0001
+        if settings.MAINTAIN_SPREADS:
+            #start_position = self.start_position_buy if index < 0 else self.start_position_sell
+            start_position =  bidprice if index < 0 else askprice
             # First positions (index 1, -1) should start right at start_position, others should branch from there
             index = index + 1 if index < 0 else index - 1
+            return math.toNearest(start_position * (1 + settings.INTERVAL) ** index, 0.0001)
         else:
+            start_position =  bidprice if index > 0 else askprice
             # Offset mode: ticker comes from a reference exchange and we define an offset.
-            orderbook = self.exchange.ftx.market_depth(self.exchange.ftx.symbol)
-            amt = quantity
-            asksize = 0
-            askvolume = 0
-            bidsize = 0
-            bidvolume = 0
-            i = 0
-            j = 0
-            fee = 1 - 0.000
-            while(asksize < amt):
-                asksize += orderbook["asks"][i][1]
-                askvolume += orderbook["asks"][i][1] * orderbook["asks"][i][0]/fee
-                i += 1
-            while(bidsize < amt):
-                bidsize += orderbook["bids"][j][1]
-                bidvolume += orderbook["bids"][j][1] * orderbook["bids"][j][0] * fee
-                j += 1
-            askprice = askvolume/asksize
-            bidprice = bidvolume/bidsize
-            self.start_position_sell = bidprice
-            self.start_position_buy = askprice
-            start_position = self.start_position_buy if index < 0 else self.start_position_sell
 
             # If we're attempting to sell, but our sell price is actually lower than the buy,
             # move over to the sell side.
-            if index > 0:
-                return math.toNearest(bidprice-0.0001, 0.0001)
+            if index > 0 and start_position < self.start_position_buy:
+                start_position = self.start_position_sell
             # Same for buys.
-            if index < 0 :
-                return math.toNearest(askprice+0.0001, 0.0001)
-        
+            if index < 0 and start_position > self.start_position_sell:
+                start_position = self.start_position_buy
+            return math.toNearest(start_position * (1 - settings.INTERVAL) ** index, 0.0001)
         #return math.toNearest(start_position * (1 + settings.INTERVAL) ** index, self.instrument['tickSize'])
 
     ###
@@ -345,7 +328,7 @@ class OrderManager:
 
     def place_orders(self):
         """Create order items for use in convergence."""
-        '''
+        
         buy_orders = []
         sell_orders = []
         # Create orders from the outside in. This is intentional - let's say the inner order gets taken;
@@ -357,28 +340,7 @@ class OrderManager:
                 buy_orders.append(self.prepare_order(-i))
             if not self.short_position_limit_exceeded():
                 sell_orders.append(self.prepare_order(i))
-        '''
-        #self.exchange.cancel_all_orders()
-        i = 1
-        symbol=settings.FTXSYMBOL
-        size = 0.01
-        spread = 0.0002
-        bid = self.prepare_order(-i)
-        ask = self.prepare_order(i)
-        j = 0
-        '''
-        while (j < 5):
-            size = size + size * j/5
-            targetask = ask["price"] * (1+spread+spread*j/2)
-            targetbid = bid["price"] * (1-spread-spread*j/2)
-            placeask = self.exchange.ftx.place_order(symbol, "sell", targetask , size , "limit") 
-            placebid = self.exchange.ftx.place_order(symbol, "buy", targetbid , size , "limit")
-            j += 1 
-        '''
-        buy_orders = []
-        buy_orders.append(self.prepare_order(-i))
-        sell_orders = []
-        sell_orders.append(self.prepare_order(i))
+        
         return self.converge_orders(buy_orders, sell_orders)
 
 
@@ -390,10 +352,9 @@ class OrderManager:
         else:
             quantity = settings.ORDER_START_SIZE + ((abs(index) - 1) * settings.ORDER_STEP_SIZE)
 
-        quantity = 0.01
         price = self.get_price_offset(index,quantity)
 
-        return {'price': price, 'orderQty': quantity, 'side': "buy" if index > 0 else "sell"}
+        return {'price': price, 'orderQty': quantity, 'side': "buy" if index < 0 else "sell"}
 
     def converge_orders(self, buy_orders, sell_orders):
         """Converge the orders we currently have in the book with what we want to be in the book.
@@ -441,12 +402,12 @@ class OrderManager:
 
         if len(to_amend) > 0:
             for amended_order in reversed(to_amend):
-                reference_order = [o for o in existing_orders if o['orderID'] == amended_order['orderID']][0]
+                reference_order = [o for o in existing_orders if o[0] == amended_order['orderID']][0]
                 logger.info("Amending %4s: %d @ %.*f to %d @ %.*f (%+.*f)" % (
                     amended_order['side'],
-                    reference_order['leavesQty'], tickLog, reference_order['price'],
-                    (amended_order['orderQty'] - reference_order['cumQty']), tickLog, amended_order['price'],
-                    tickLog, (amended_order['price'] - reference_order['price'])
+                    reference_order[0], tickLog, reference_order[5],
+                    (amended_order['orderQty'] - reference_order[8]), tickLog, amended_order['price'],
+                    tickLog, (amended_order['price'] - reference_order[5])
                 ))
             # This can fail if an order has closed in the time we were processing.
             # The API will send us `invalid ordStatus`, which means that the order's status (Filled/Canceled)
@@ -456,6 +417,7 @@ class OrderManager:
                 self.exchange.amend_bulk_orders(to_amend)
             except requests.exceptions.HTTPError as e:
                 errorObj = e.response.json()
+                print(errorObj)
                 if errorObj['error']['message'] == 'Invalid ordStatus':
                     logger.warn("Amending failed. Waiting for order data to converge and retrying.")
                     sleep(0.5)

@@ -227,6 +227,13 @@ class FTX(object):
                                      'type': type1,
                                      'ioc': ioc,
                                      'postOnly': post_only})
+
+    @authentication_required
+    def modify_order(self, orderid, price: float, size: float) -> dict:
+        return self._post('orders/'+ str(orderid) +'/modify', {
+                                     'price': price,
+                                     'size': size
+                                        })
     @authentication_required    
     def cancel_order(self,id) -> List[dict]:
         return self._delete('orders/'+str(id[0]))
@@ -240,7 +247,10 @@ class FTX(object):
     def amend_bulk_orders(self, orders):
         """Amend multiple orders."""
         # Note rethrow; if this fails, we want to catch it and re-tick
-        return self._curl_bitmex(path='order/bulk', postdict={'orders': orders}, verb='PUT', rethrow_errors=True)
+        #return self._curl_bitmex(path='order/bulk', postdict={'orders': orders}, verb='PUT', rethrow_errors=True)
+        for order in orders:
+            self.modify_order(order['orderID'], order['price'] , order['orderQty'])
+
 
     @authentication_required
     def create_bulk_orders(self, orders):
